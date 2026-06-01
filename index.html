@@ -449,31 +449,60 @@
 let allData = [];
 let currentFilter = 'all';
 
-const PROXY = 'https://api.allorigins.win/get?url=' + encodeURIComponent('https://weao.xyz/api/status/exploits');
+const TARGET = 'https://weao.xyz/api/status/exploits';
+const PROXIES = [
+  url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+  url => `https://thingproxy.freeboard.io/fetch/${url}`,
+];
 
 const ALLOWED = ['delta','codex','potassium','ronix','madium','cosmic'];
+
+async function tryProxy(proxyFn) {
+  const url = proxyFn(TARGET);
+  const res = await fetch(url, { signal: AbortSignal.timeout(7000) });
+  if (!res.ok) throw new Error('bad status');
+  const text = await res.text();
+  // allorigins wraps in {contents:...}, others return raw
+  try {
+    const json = JSON.parse(text);
+    if (json.contents) return JSON.parse(json.contents);
+    return json;
+  } catch {
+    return JSON.parse(text);
+  }
+}
 
 async function fetchData() {
   const grid = document.getElementById('grid');
   grid.innerHTML = `<div class="loading" style="grid-column:1/-1"><div class="spinner"></div><p>BUSCANDO DADOS...</p></div>`;
 
-  try {
-    const res = await fetch(PROXY);
-    const json = await res.json();
-    const data = JSON.parse(json.contents);
-    const raw = Array.isArray(data) ? data : (data.exploits || data.data || []);
-    allData = raw.filter(e => ALLOWED.includes((e.title || '').toLowerCase()));
-    updateStats();
-    render();
-  } catch (err) {
+  let data = null;
+  for (const proxyFn of PROXIES) {
+    try {
+      data = await tryProxy(proxyFn);
+      if (data) break;
+    } catch(e) {
+      continue;
+    }
+  }
+
+  if (!data) {
     grid.innerHTML = `
       <div class="error-box" style="grid-column:1/-1">
         <p style="font-size:20px;margin-bottom:10px">⚠️</p>
         <p>Não foi possível conectar. Tente novamente.</p>
-        <button onclick="fetchData()" style="margin-top:16px;background:transparent;border:1px solid rgba(244,63,94,0.3);color:#f43f5e;padding:8px 20px;border-radius:8px;cursor:pointer;font-family:Arial,sans-serif;font-size:12px">↺ Tentar novamente</button>
+        <button onclick="fetchData()" style="margin-top:16px;background:transparent;border:1px solid rgba(192,57,43,0.3);color:#c0392b;padding:8px 20px;border-radius:8px;cursor:pointer;font-family:Arial,sans-serif;font-size:12px">↺ Tentar novamente</button>
       </div>`;
     document.getElementById('statsBar').innerHTML = '';
+    return;
   }
+
+  const raw = Array.isArray(data) ? data : (data.exploits || data.data || []);
+  allData = raw.filter(e => ALLOWED.includes((e.title || '').toLowerCase()));
+  updateStats();
+  render();
 }
 
 function isMobile(e) {
